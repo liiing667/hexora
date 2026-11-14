@@ -106,7 +106,7 @@ impl Iterator for OrderedAuditResults {
 
             while self.in_flight < MAX_IN_FLIGHT_AUDITS {
                 match self.stream.next() {
-                    Some(file) => {
+                    Some(Ok(file)) => {
                         let seq = self.seq;
                         self.seq += 1;
                         self.in_flight += 1;
@@ -115,6 +115,12 @@ impl Iterator for OrderedAuditResults {
                             let result = audit_file_checked(file);
                             let _ = tx.send((seq, result));
                         });
+                    }
+                    Some(Err(e)) => {
+                        // Extraction stopped on a budget violation or an
+                        // unreadable archive; surface it and stop the scan.
+                        error!("Archive extraction failed: {}", e);
+                        break;
                     }
                     None => break,
                 }
@@ -176,6 +182,7 @@ mod tests {
     fn test_audit_path_yields_all_files_in_discovery_order() {
         let path = test_resources();
         let expected: Vec<String> = hexora_io::list_python_files(&path, None)
+            .unwrap()
             .map(|f| f.full_path())
             .collect();
         assert!(expected.len() > 50, "test corpus should be sizable");
